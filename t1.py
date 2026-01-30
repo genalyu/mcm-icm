@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 from scipy.optimize import minimize
 
 def load_data(csv_path: str) -> pd.DataFrame: 
@@ -246,6 +247,18 @@ def plot_heatmap_votes(meta, V, uncertainty, df_season, season_id):
     plt.tight_layout()
     plt.show()
 
+def plot_feature_correlation(all_records):
+    """绘制全量特征相关性热力图 (Feature Correlation Heatmap)"""
+    if not all_records:
+        return
+    corr_df = pd.DataFrame(all_records)
+    
+    plt.figure(figsize=(12, 10))
+    sns.heatmap(corr_df.corr(), annot=True, cmap='coolwarm', fmt=".2f", center=0)
+    plt.title("T1 (Optimization) Comprehensive Feature Correlation Heatmap")
+    plt.tight_layout()
+    plt.show()
+
 def plot_finalists_trajectories(meta, V, df_season, season_id, top_k=3):
     contestants = meta["contestants"] 
     ran = meta["ran"] 
@@ -288,7 +301,90 @@ def run_one_season_percent(df, season_id: int, week_judge_cols, max_week: int, l
         plot_heatmap_votes(meta, V, uncertainty, df_s, season_id) 
         plot_finalists_trajectories(meta, V, df_s, season_id, top_k=3) 
         
-    return {"season": season_id, "consistency": rate, "uncertainty": np.nanmean(uncertainty)}
+    # 收集用于相关性分析的数据记录
+    records = []
+    T, N = meta["T"], meta["N"]
+    q = meta["q"]
+    
+    # 预提取一些静态特征用于分析
+    df_s['is_intl'] = df_s['celebrity_homecountry/region'].apply(lambda x: 1 if pd.notna(x) and x != 'United States' else 0)
+    partner_stats = df.groupby('ballroom_partner')['placement'].mean().to_dict()
+    df_s['partner_rank'] = df_s['ballroom_partner'].map(partner_stats)
+    
+    # 行业特征哑变量
+    df_s['is_actor'] = df_s['celebrity_industry'].str.contains('Actor|Actress', na=False).astype(int)
+    df_s['is_athlete'] = df_s['celebrity_industry'].str.contains('Athlete|Sport', na=False).astype(int)
+    df_s['is_musician'] = df_s['celebrity_industry'].str.contains('Musician|Singer', na=False).astype(int)
+    
+    w1_cols = [c for (wk, j, c) in week_judge_cols if wk == 1]
+    for c in w1_cols: df_s[c] = pd.to_numeric(df_s[c], errors='coerce').fillna(0)
+    df_s['w1_total'] = df_s[w1_cols].sum(axis=1)
+
+    # 累积缓存
+    cum_scores = {name: [] for name in contestants}
+
+    for t in range(T):
+        if not meta["ran"][t]: continue
+        act = meta["active_sets"][t]
+        
+        # 动态特征计算
+        cols_t = [c for (wk, j, c) in week_judge_cols if wk == t+1]
+        scores_t = df_s[cols_t].sum(axis=1)
+        
+        # 统计量
+        avg_score_t = scores_t[scores_t > 0].mean()
+        max_score_t = scores_t[scores_t > 0].max()
+        min_score_t = scores_t[scores_t > 0].min()
+        rank_t = scores_t.rank(ascending=False, method='min')
+        rel_rank_t = rank_t / len(act)
+        
+        prev_scores_t = pd.Series(0, index=df_s.index)
+        if t > 0:
+            cols_prev = [c for (wk, j, c) in week_judge_cols if wk == t]
+            prev_scores_t = df_s[cols_prev].sum(axis=1)
+
+        for i in act:
+            qi = q.get((t, i), 0.0)
+            vi = V[t, i]
+            is_elim = 1 if i in meta["E"][t] else 0
+            
+            name = contestants[i]
+            row = df_s[df_s['celebrity_name'] == name].iloc[0]
+            
+            score_now = row[cols_t].sum()
+            cum_scores[name].append(score_now)
+            
+            records.append({
+                "Judge Score (Norm)": qi,
+                "Est. Vote Share": vi,
+                "Total Score": qi + vi,
+                "Is Eliminated": is_elim,
+                "Age": row['celebrity_age_during_season'],
+                "Is Intl": row['is_intl'],
+                "Partner Strength": row['partner_rank'],
+                "W1 Performance": row['w1_total'],
+                "Momentum": score_now - prev_scores_t.loc[df_s['celebrity_name'] == name].values[0],
+                "Rel Performance": score_now / (avg_score_t + 1e-9),
+                "Gap to Top": max_score_t - score_now,
+                "Gap to Bottom": score_now - min_score_t,
+                "Week Rank": rank_t.loc[df_s['celebrity_name'] == name].values[0],
+                "Rel Rank": rel_rank_t.loc[df_s['celebrity_name'] == name].values[0],
+                "Cum Avg Score": np.mean(cum_scores[name]),
+                "Cum Max Score": np.max(cum_scores[name]),
+                "Cum Std Score": np.std(cum_scores[name]) if len(cum_scores[name]) > 1 else 0,
+                "Is Actor": row['is_actor'],
+                "Is Athlete": row['is_athlete'],
+                "Is Musician": row['is_musician'],
+                "Season": season_id,
+                "Week": t + 1
+            })
+
+    return {
+        "season": season_id, 
+        "consistency": rate, 
+        "uncertainty": np.nanmean(uncertainty),
+        "records": records
+    }
 
 if __name__ == "__main__":
     CSV_PATH = "2026_MCM_Problem_C_Data.csv"
@@ -296,8 +392,10 @@ if __name__ == "__main__":
     week_judge_cols, weeks = parse_week_judge_columns(df)
     max_week = max(weeks)
     
-    all_seasons = sorted(df["season"].unique())
+    # all_seasons = sorted(df["season"].unique())
+    all_seasons = [1]
     results = []
+    all_records = []
     
     print(f"{'Season':<10} | {'Consistency':<12} | {'Uncertainty':<12}")
     print("-" * 40)
@@ -307,7 +405,11 @@ if __name__ == "__main__":
         res = run_one_season_percent(df, sid, week_judge_cols, max_week, silent=(sid != 27))
         if res:
             results.append(res)
+            all_records.extend(res["records"])
             print(f"{res['season']:<10} | {res['consistency']:<12.3f} | {res['uncertainty']:<12.4f}")
+
+    print("\nGenerating Feature Correlation Heatmap...")
+    plot_feature_correlation(all_records)
 
     rdf = pd.DataFrame(results)
     print("\nSummary Statistics:")
