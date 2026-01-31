@@ -172,14 +172,14 @@ def solve_percent_inverse(meta_builder_output, maxiter=2000, ftol=1e-9):
         V[t, i] = res.x[k] 
     return res, meta, V
 
-def estimate_uncertainty(contestants, J, ran, E, base_lam=2.0, n_trials=5):
+def estimate_uncertainty(contestants, J, ran, E, base_lam=2.0, n_trials=2):
     """
     通过微扰平滑参数 lam 来估计不确定性 (Uncertainty Measure)
     返回 V 的标准差矩阵
     """
     all_V = []
     # 在 base_lam 附近进行微扰
-    lams = np.linspace(base_lam * 0.8, base_lam * 1.2, n_trials)
+    lams = [base_lam * 0.9, base_lam * 1.1]
     for l in lams:
         prob = build_problem_percent(contestants, J, ran, E, lam=l)
         res, meta, V = solve_percent_inverse(prob)
@@ -199,7 +199,8 @@ def check_consistency_percent(meta, V):
     E = meta["E"] 
     q = meta["q"] 
     active_sets = meta["active_sets"]
-    preds = {} 
+    preds_model = {} 
+    preds_judge = {} 
     elim_weeks = [] 
     for t in range(T): 
         if not ran[t]: 
@@ -207,15 +208,27 @@ def check_consistency_percent(meta, V):
         if len(E[t]) > 0:
             elim_weeks.append(t) 
         act = active_sets[t] 
-        C = {i: (q.get((t, i), 0.0) + V[t, i]) for i in act} 
-        pred = min(C, key=C.get) if len(C) else None 
-        preds[t] = pred 
-    correct = 0 
+        # 模型预测：q + V
+        C_model = {i: (q.get((t, i), 0.0) + V[t, i]) for i in act} 
+        pred_m = min(C_model, key=C_model.get) if len(C_model) else None 
+        preds_model[t] = pred_m
+        
+        # 基准预测：仅靠评委分 q
+        C_judge = {i: q.get((t, i), 0.0) for i in act}
+        pred_j = min(C_judge, key=C_judge.get) if len(C_judge) else None
+        preds_judge[t] = pred_j
+
+    correct_m = 0 
+    correct_j = 0
     for t in elim_weeks:
-        if preds.get(t, None) in E[t]: 
-            correct += 1 
-    rate = correct / len(elim_weeks) if elim_weeks else np.nan 
-    return rate, preds, elim_weeks 
+        if preds_model.get(t, None) in E[t]: 
+            correct_m += 1 
+        if preds_judge.get(t, None) in E[t]:
+            correct_j += 1
+            
+    rate_m = correct_m / len(elim_weeks) if elim_weeks else np.nan 
+    rate_j = correct_j / len(elim_weeks) if elim_weeks else np.nan
+    return rate_m, rate_j, preds_model, elim_weeks 
 def plot_heatmap_votes(meta, V, uncertainty, df_season, season_id):
     contestants = meta["contestants"] 
     ran = meta["ran"]
@@ -294,10 +307,10 @@ def run_one_season_percent(df, season_id: int, week_judge_cols, max_week: int, l
         return None
         
     uncertainty = estimate_uncertainty(contestants, J, ran, E, base_lam=lam)
-    rate, preds, elim_weeks = check_consistency_percent(meta, V) 
+    rate_m, rate_j, preds, elim_weeks = check_consistency_percent(meta, V) 
     
     if not silent:
-        print(f"[Season {season_id}] Success. Consistency = {rate:.3f}, Avg Uncertainty = {np.nanmean(uncertainty):.4f}") 
+        print(f"[Season {season_id}] Success. Model Consist. = {rate_m:.3f}, Judge-only Consist. = {rate_j:.3f}, Avg Uncertainty = {np.nanmean(uncertainty):.4f}") 
         plot_heatmap_votes(meta, V, uncertainty, df_s, season_id) 
         plot_finalists_trajectories(meta, V, df_s, season_id, top_k=3) 
         
@@ -381,7 +394,8 @@ def run_one_season_percent(df, season_id: int, week_judge_cols, max_week: int, l
 
     return {
         "season": season_id, 
-        "consistency": rate, 
+        "consistency": rate_m, 
+        "consistency_judge": rate_j,
         "uncertainty": np.nanmean(uncertainty),
         "records": records
     }
@@ -392,21 +406,22 @@ if __name__ == "__main__":
     week_judge_cols, weeks = parse_week_judge_columns(df)
     max_week = max(weeks)
     
-    # all_seasons = sorted(df["season"].unique())
-    all_seasons = [1]
+    all_seasons = sorted(df["season"].unique())
     results = []
     all_records = []
     
-    print(f"{'Season':<10} | {'Consistency':<12} | {'Uncertainty':<12}")
-    print("-" * 40)
+    print(f"{'Season':<10} | {'Model Consist.':<15} | {'Judge Consist.':<15} | {'Uncertainty':<12}")
+    print("-" * 60)
     
     for sid in all_seasons:
-        # Run silent for all, only plot one example (e.g., season 27)
-        res = run_one_season_percent(df, sid, week_judge_cols, max_week, silent=(sid != 27))
+        # Run silent for all, only plot one example if needed
+        res = run_one_season_percent(df, sid, week_judge_cols, max_week, silent=True)
         if res:
             results.append(res)
             all_records.extend(res["records"])
-            print(f"{res['season']:<10} | {res['consistency']:<12.3f} | {res['uncertainty']:<12.4f}")
+            print(f"{res['season']:<10} | {res['consistency']:<15.3f} | {res['consistency_judge']:<15.3f} | {res['uncertainty']:<12.4f}")
+        else:
+            print(f"{sid:<10} | Failed       | N/A")
 
     print("\nGenerating Feature Correlation Heatmap...")
     plot_feature_correlation(all_records)
