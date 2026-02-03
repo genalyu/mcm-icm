@@ -41,7 +41,10 @@ Our work is divided into four main tasks, following a rigorous data-driven pipel
 - **Formula:** 🔢
 
 $$
-V_i' = \begin{cases} V_i^{actual} & \text{if } R_i \le \sigma_i \\ \hat{V}_i + \sigma_i + \gamma \cdot \ln(1 + R_i - \sigma_i) & \text{if } R_i > \sigma_i \end{cases}
+V_i' = \begin{cases} 
+V_i^{actual} & \text{if } R_i \le \sigma_i \\ 
+\hat{V}_i + \sigma_i + \gamma \cdot \ln(1 + R_i - \sigma_i) & \text{if } R_i > \sigma_i 
+\end{cases}
 $$
 
 *Where $R_i$ is the residual (popularity bias), and $\sigma_i$ is the dynamic threshold.*
