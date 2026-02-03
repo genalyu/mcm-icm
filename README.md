@@ -47,7 +47,7 @@ V_i^{actual} & \text{if } R_i \le \sigma_i \\
 \end{cases}
 $$
 
-*Where $R_i$ is the residual (popularity bias), and $\sigma_i$ is the dynamic threshold.*
+Where $R_i$ is the residual (popularity bias), and $\sigma_i$ is the dynamic threshold.
 - **Evaluation:** Sensitivity analysis demonstrates high feasibility and robustness in correcting anomalies like Jerry Rice and Bobby Bones without "punishing" fair popularity.
 
 ---
