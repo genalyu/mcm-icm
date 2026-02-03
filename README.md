@@ -6,6 +6,8 @@ This project aims to analyze and optimize the scoring system of the "Dancing wit
 
 ## 🏗️ Project Structure & Methodology
 
+![Project Framework](images/Our_work.png)
+
 Our work is divided into four main tasks, following a rigorous data-driven pipeline:
 
 ### **🛠️ Data Processing (Foundation)**
