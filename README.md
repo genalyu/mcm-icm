@@ -4,7 +4,7 @@
 
 This project (Migrated to public repository on Feb 3, 2026, 10:00 AM GMT+8) aims to analyze and optimize the scoring system of the "Dancing with the Stars" (DWTS) television show. By leveraging machine learning and statistical modeling, we reconstruct latent voting patterns, simulate counterfactual scenarios, and propose a new, fairer scoring mechanism called the **Causal-Adaptive Truncation Protocol (CATP)**.
 
-The essay Was designated as **Honorable Mention**.
+The essay was designated as **Honorable Mention**.
 
 ---
 
